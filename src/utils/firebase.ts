@@ -20,6 +20,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Item, Category, SubCategory } from '../types';
+import { compressDataUrl } from './imageCompressor';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -107,35 +108,80 @@ export async function uploadAllToCloud(
   items: Item[],
   categories: Category[],
   subCategories: SubCategory[]
-): Promise<{ success: boolean; itemCount: number }> {
+): Promise<{ success: boolean; itemCount: number; error?: string }> {
   try {
-    const batch = writeBatch(db);
-
-    // Save items
-    for (const item of items) {
-      const itemRef = doc(db, `users/${userId}/items`, item.id);
-      batch.set(itemRef, { ...item, userId });
+    if (!userId) {
+      return { success: false, itemCount: 0, error: 'غير مسجل دخول' };
     }
 
-    // Save categories
+    // 1. Process items and optimize base64 images so they do not exceed Firestore 1MB doc limit
+    const optimizedItems: Item[] = await Promise.all(
+      items.map(async (item) => {
+        const itemImages = item.images || (item.image ? [item.image] : []);
+        const compImgs = await Promise.all(
+          itemImages.map(async (img) => {
+            if (!img || !img.startsWith('data:image/')) return img;
+            // Compress for cloud document storage if large (> 100KB string)
+            if (img.length > 100000) {
+              return await compressDataUrl(img, 800, 800, 0.7);
+            }
+            return img;
+          })
+        );
+
+        return {
+          ...item,
+          image: compImgs[0] || item.image || '',
+          images: compImgs,
+        };
+      })
+    );
+
+    // 2. Prepare chunked writes (max 50 operations per writeBatch to prevent Firestore limits)
+    const BATCH_SIZE = 50;
+
+    // Collect all write operations
+    const operations: { ref: ReturnType<typeof doc>; data: Record<string, unknown> }[] = [];
+
+    for (const item of optimizedItems) {
+      operations.push({
+        ref: doc(db, `users/${userId}/items`, item.id),
+        data: { ...item, userId },
+      });
+    }
+
     for (const cat of categories) {
-      const catRef = doc(db, `users/${userId}/categories`, cat.id);
-      batch.set(catRef, { ...cat, userId });
+      operations.push({
+        ref: doc(db, `users/${userId}/categories`, cat.id),
+        data: { ...cat, userId },
+      });
     }
 
-    // Save subcategories
     for (const subCat of subCategories) {
-      const subRef = doc(db, `users/${userId}/subcategories`, subCat.id);
-      batch.set(subRef, { ...subCat, userId });
+      operations.push({
+        ref: doc(db, `users/${userId}/subcategories`, subCat.id),
+        data: { ...subCat, userId },
+      });
     }
 
-    await batch.commit();
+    // Execute in chunks
+    for (let i = 0; i < operations.length; i += BATCH_SIZE) {
+      const chunk = operations.slice(i, i + BATCH_SIZE);
+      const batch = writeBatch(db);
+      for (const op of chunk) {
+        batch.set(op.ref, op.data);
+      }
+      await batch.commit();
+    }
+
     return { success: true, itemCount: items.length };
-  } catch (err) {
+  } catch (err: unknown) {
+    console.error('uploadAllToCloud error:', err);
+    const errMsg = err instanceof Error ? err.message : String(err);
     handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
-    return { success: false, itemCount: 0 };
+    return { success: false, itemCount: 0, error: errMsg };
   }
-}
+};
 
 export async function downloadAllFromCloud(
   userId: string

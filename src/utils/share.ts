@@ -1,4 +1,7 @@
 import { Item } from '../types';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 
 export interface ShareDataPayload {
   title: string;
@@ -7,9 +10,9 @@ export interface ShareDataPayload {
 }
 
 /**
- * Safely converts a base64 Data URL, utf8 SVG, or fetchable URL to a File object
+ * Safely converts a base64 Data URL, utf8 SVG, or fetchable URL to a Blob object
  */
-export const urlToFile = async (url: string, filename: string): Promise<File | null> => {
+export const urlToBlob = async (url: string): Promise<Blob | null> => {
   try {
     if (!url) return null;
 
@@ -24,7 +27,6 @@ export const urlToFile = async (url: string, filename: string): Promise<File | n
       let mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
       if (header.includes('svg')) mime = 'image/svg+xml';
 
-      let blob: Blob;
       if (header.includes('base64')) {
         const binaryStr = atob(data);
         const len = binaryStr.length;
@@ -32,20 +34,33 @@ export const urlToFile = async (url: string, filename: string): Promise<File | n
         for (let i = 0; i < len; i++) {
           u8arr[i] = binaryStr.charCodeAt(i);
         }
-        blob = new Blob([u8arr], { type: mime });
+        return new Blob([u8arr], { type: mime });
       } else {
         const decoded = decodeURIComponent(data);
-        blob = new Blob([decoded], { type: mime });
+        return new Blob([decoded], { type: mime });
       }
-
-      return new File([blob], filename, { type: mime });
     } else {
       const res = await fetch(url);
-      const blob = await res.blob();
-      return new File([blob], filename, { type: blob.type || 'image/jpeg' });
+      if (!res.ok) throw new Error(`Fetch failed with status ${res.status}`);
+      return await res.blob();
     }
   } catch (err) {
-    console.warn('Could not convert image to File for share:', err);
+    console.warn('Could not convert image URL to Blob:', err);
+    return null;
+  }
+};
+
+/**
+ * Safely converts a base64 Data URL, utf8 SVG, or fetchable URL to a File object via Blob
+ */
+export const urlToFile = async (url: string, filename: string): Promise<File | null> => {
+  try {
+    const blob = await urlToBlob(url);
+    if (!blob) return null;
+    const mimeType = blob.type || (filename.endsWith('.svg') ? 'image/svg+xml' : 'image/jpeg');
+    return new File([blob], filename, { type: mimeType, lastModified: Date.now() });
+  } catch (err) {
+    console.warn('Could not convert image Blob to File for share:', err);
     return null;
   }
 };
@@ -72,7 +87,7 @@ ${item.notes ? `📝 *ملاحظات:* ${item.notes}\n` : ''}
 };
 
 /**
- * Shares item using Web Share API including image files (for Android/WhatsApp/Telegram)
+ * Shares item using Native Android Share sheet or Web Share API including HD image files
  */
 export const shareItemWithImages = async (
   item: Item,
@@ -80,12 +95,52 @@ export const shareItemWithImages = async (
   subCategoryName?: string
 ): Promise<{ success: boolean; method: 'native_files' | 'native_text' | 'whatsapp' | 'copied'; error?: string }> => {
   const shareText = formatItemShareText(item, categoryName, subCategoryName);
-  const imagesList = item.images && item.images.length > 0 ? item.images : [item.image];
+  const imagesList = item.images && item.images.length > 0 ? item.images : (item.image ? [item.image] : []);
 
-  // Convert images to File objects for Web Share API
+  // 1. Native Mobile Platform (Android APK via Capacitor)
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const fileUris: string[] = [];
+
+      for (let i = 0; i < Math.min(imagesList.length, 4); i++) {
+        const imgUrl = imagesList[i];
+        if (!imgUrl) continue;
+
+        let base64Data = imgUrl;
+        if (imgUrl.includes(',')) {
+          base64Data = imgUrl.split(',')[1];
+        }
+
+        const fileName = `bilal_koo_item_${item.barcode}_${i + 1}.jpg`;
+        const writeRes = await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Cache,
+        });
+
+        fileUris.push(writeRes.uri);
+      }
+
+      await Share.share({
+        title: `قطعة: ${item.name}`,
+        text: shareText,
+        files: fileUris.length > 0 ? fileUris : undefined,
+      });
+
+      return { success: true, method: 'native_files' };
+    } catch (err: unknown) {
+      console.warn('Capacitor native share exception:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('canceled') || message.includes('cancelled')) {
+        return { success: true, method: 'native_files' };
+      }
+    }
+  }
+
+  // 2. Web Share API (Desktop / Web Browsers)
   const filePromises = imagesList
     .filter(Boolean)
-    .slice(0, 4) // max 4 files for maximum app compatibility
+    .slice(0, 4)
     .map((imgUrl, index) => {
       const ext = imgUrl.includes('image/svg') ? 'svg' : 'jpg';
       return urlToFile(imgUrl, `bilal-koo-item-${item.barcode}-${index + 1}.${ext}`);
@@ -93,44 +148,35 @@ export const shareItemWithImages = async (
 
   const files = (await Promise.all(filePromises)).filter((f): f is File => f !== null);
 
-  // Check Web Share API support
   if (typeof navigator !== 'undefined' && navigator.share) {
     try {
-      // 1. Try sharing with multiple image files AND text
-      if (files.length > 0 && navigator.canShare) {
+      if (files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
         try {
-          if (navigator.canShare({ files })) {
-            await navigator.share({
-              title: `قطعة: ${item.name} - بلال كو`,
-              text: shareText,
-              files: files,
-            });
-            return { success: true, method: 'native_files' };
-          }
+          await navigator.share({
+            title: `قطعة: ${item.name} - بلال كو`,
+            text: shareText,
+            files: files,
+          });
+          return { success: true, method: 'native_files' };
         } catch (fErr) {
-          console.warn('Files + text share failed, trying files only:', fErr);
+          console.warn('Web Share files + text failed, attempting files only:', fErr);
         }
 
-        // 2. Try sharing ONLY files (works on Android Chrome / WhatsApp when text+files combination fails)
         try {
-          if (navigator.canShare({ files })) {
-            // Copy formatted text to clipboard so user can paste it into WhatsApp alongside images
-            try {
-              await navigator.clipboard.writeText(shareText);
-            } catch (e) {}
+          try {
+            await navigator.clipboard.writeText(shareText);
+          } catch (e) {}
 
-            await navigator.share({
-              title: `قطعة: ${item.name}`,
-              files: files,
-            });
-            return { success: true, method: 'native_files' };
-          }
+          await navigator.share({
+            title: `قطعة: ${item.name}`,
+            files: files,
+          });
+          return { success: true, method: 'native_files' };
         } catch (filesOnlyErr) {
-          console.warn('Files-only share failed:', filesOnlyErr);
+          console.warn('Web Share files-only failed:', filesOnlyErr);
         }
       }
 
-      // 3. Fallback Web Share text (opens Android share menu with WhatsApp, Telegram, etc.)
       await navigator.share({
         title: `قطعة: ${item.name} - بلال كو`,
         text: shareText,
@@ -138,14 +184,13 @@ export const shareItemWithImages = async (
       return { success: true, method: 'native_text' };
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
-        // User cancelled share dialog
         return { success: true, method: 'native_text' };
       }
       console.warn('Web Share API exception:', err);
     }
   }
 
-  // Fallback 2: Copy formatted text to clipboard & open WhatsApp
+  // Fallback 3: Copy to clipboard & open WhatsApp
   try {
     await navigator.clipboard.writeText(shareText);
     openWhatsAppShare(item, categoryName, subCategoryName);
@@ -154,7 +199,7 @@ export const shareItemWithImages = async (
     console.warn('WhatsApp direct share fallback:', waErr);
   }
 
-  // Fallback 3: Copy formatted text to clipboard
+  // Fallback 4: Copy formatted text to clipboard
   try {
     await navigator.clipboard.writeText(shareText);
     return { success: true, method: 'copied' };
@@ -168,7 +213,42 @@ export const shareItemWithImages = async (
  * Shares ONLY the high-resolution images via native share sheet (HD quality)
  */
 export const shareImagesOnly = async (item: Item): Promise<boolean> => {
-  const imagesList = item.images && item.images.length > 0 ? item.images : [item.image];
+  const imagesList = item.images && item.images.length > 0 ? item.images : (item.image ? [item.image] : []);
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const fileUris: string[] = [];
+      for (let i = 0; i < Math.min(imagesList.length, 4); i++) {
+        const imgUrl = imagesList[i];
+        if (!imgUrl) continue;
+
+        let base64Data = imgUrl;
+        if (imgUrl.includes(',')) {
+          base64Data = imgUrl.split(',')[1];
+        }
+
+        const fileName = `bilal_koo_hd_${item.barcode}_${i + 1}.jpg`;
+        const writeRes = await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Cache,
+        });
+
+        fileUris.push(writeRes.uri);
+      }
+
+      if (fileUris.length > 0) {
+        await Share.share({
+          files: fileUris,
+        });
+        return true;
+      }
+    } catch (err) {
+      console.warn('Native shareImagesOnly failed:', err);
+      return false;
+    }
+  }
+
   const filePromises = imagesList
     .filter(Boolean)
     .slice(0, 4)

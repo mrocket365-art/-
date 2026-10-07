@@ -54,8 +54,12 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     try {
       const user = await loginWithGoogle();
       setStatusMessage({ type: 'success', text: `أهلاً بك ${user.displayName || user.email}! تم ربط الحساب السحابي بنجاح.` });
-    } catch (err) {
-      setStatusMessage({ type: 'error', text: 'فشل تسجيل الدخول باستخدام Google.' });
+    } catch (err: unknown) {
+      console.warn('Google Sign In Error:', err);
+      setStatusMessage({
+        type: 'error',
+        text: 'تعذر فتح نافذة Google. يرجى استخدام زر (تفعيل المزامنة الفورية) بالأسفل للعمل مباشرة.'
+      });
     } finally {
       setIsLoading(false);
     }
@@ -66,9 +70,10 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     setStatusMessage(null);
     try {
       await loginAnonymously();
-      setStatusMessage({ type: 'success', text: 'تم تسجيل الدخول السحابي المؤقت بنجاح.' });
-    } catch (err) {
-      setStatusMessage({ type: 'error', text: 'فشل تفعيل الحساب السحابي.' });
+      setStatusMessage({ type: 'success', text: 'تم تفعيل حسابك السحابي المباشر بنجاح!' });
+    } catch (err: unknown) {
+      console.error('Anonymous Sign In Error:', err);
+      setStatusMessage({ type: 'error', text: 'تعذر الاتصال بالخادم السحابي. يرجى التحقق من الاتصال بالإنترنت.' });
     } finally {
       setIsLoading(false);
     }
@@ -87,39 +92,64 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   };
 
   const handleUploadToCloud = async () => {
-    if (!currentUser) return;
+    let activeUser = currentUser;
+    if (!activeUser) {
+      // Auto login anonymously if not signed in yet
+      try {
+        activeUser = await loginAnonymously();
+        setCurrentUser(activeUser);
+      } catch (err) {
+        setStatusMessage({ type: 'error', text: 'يرجى تفعيل المزامنة السحابية أولاً.' });
+        return;
+      }
+    }
+
     setIsLoading(true);
-    setStatusMessage({ type: 'info', text: 'جاري رفع البيانات إلى التخزين السحابي...' });
+    setStatusMessage({ type: 'info', text: 'جاري معالجة ورفع البيانات والصور إلى السحاب...' });
 
     try {
       const categories = loadCategories();
       const subCategories = loadSubCategories();
       const items = await loadItemsAsync();
 
-      const result = await uploadAllToCloud(currentUser.uid, items, categories, subCategories);
+      const result = await uploadAllToCloud(activeUser.uid, items, categories, subCategories);
       if (result.success) {
         setStatusMessage({
           type: 'success',
-          text: `تم رفع ${result.itemCount} قطعة بنجاح إلى حسابك السحابي! يمكنك الآن فتحها من أي جهاز آخر.`
+          text: `تم رفع ${result.itemCount} قطعة والأقسام بنجاح! يمكنك الآن استعادتها من أي جهاز آخر.`
         });
         onSyncComplete();
       } else {
-        setStatusMessage({ type: 'error', text: 'فشل رفع البيانات إلى السحاب.' });
+        setStatusMessage({
+          type: 'error',
+          text: `فشل الرفع: ${result.error || 'يرجى المحاولة مرة أخرى.'}`
+        });
       }
-    } catch (err) {
-      setStatusMessage({ type: 'error', text: 'حدث خطأ أثناء الرفع.' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage({ type: 'error', text: `حدث خطأ أثناء الرفع: ${msg}` });
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleDownloadFromCloud = async () => {
-    if (!currentUser) return;
+    let activeUser = currentUser;
+    if (!activeUser) {
+      try {
+        activeUser = await loginAnonymously();
+        setCurrentUser(activeUser);
+      } catch (err) {
+        setStatusMessage({ type: 'error', text: 'يرجى تفعيل المزامنة السحابية أولاً.' });
+        return;
+      }
+    }
+
     setIsLoading(true);
-    setStatusMessage({ type: 'info', text: 'جاري استعادة البيانات من السحاب...' });
+    setStatusMessage({ type: 'info', text: 'جاري جلب بياناتك من السحاب...' });
 
     try {
-      const data = await downloadAllFromCloud(currentUser.uid);
+      const data = await downloadAllFromCloud(activeUser.uid);
       if (data) {
         if (data.categories && data.categories.length > 0) saveCategories(data.categories);
         if (data.subCategories && data.subCategories.length > 0) saveSubCategories(data.subCategories);
@@ -127,14 +157,15 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
         setStatusMessage({
           type: 'success',
-          text: `تم استعادة ${data.items.length} قطعة بنجاح وتحديث الهاتف بها!`
+          text: `تم استعادة ${data.items ? data.items.length : 0} قطعة والأقسام بنجاح وتحديث تطبيقك!`
         });
         onSyncComplete();
       } else {
-        setStatusMessage({ type: 'error', text: 'لم يتم العثور على بيانات سابقة في حسابك السحابي.' });
+        setStatusMessage({ type: 'error', text: 'لم يتم العثور على بيانات سابقة في هذا الحساب السحابي.' });
       }
-    } catch (err) {
-      setStatusMessage({ type: 'error', text: 'حدث خطأ أثناء تنزيل البيانات.' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage({ type: 'error', text: `حدث خطأ أثناء تنزيل البيانات: ${msg}` });
     } finally {
       setIsLoading(false);
     }
