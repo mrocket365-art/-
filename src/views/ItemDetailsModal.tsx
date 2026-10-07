@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Item, Category, SubCategory } from '../types';
 import { BarcodeSVG } from '../components/BarcodeSVG';
-import { shareItem, openWhatsAppShare } from '../utils/share';
+import { shareItemWithImages, openWhatsAppShare, downloadItemImage } from '../utils/share';
 import {
   X,
   Edit,
@@ -18,7 +18,8 @@ import {
   Check,
   Share2,
   MessageCircle,
-  Share,
+  Download,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 interface ItemDetailsModalProps {
@@ -61,9 +62,12 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   };
 
   const handleShareNative = async () => {
-    const res = await shareItem(item, categoryName, subCategoryName);
-    if (res.method === 'copied') {
-      setShareNotice('تم نسخ كافة تفاصيل القطعة إلى الحافظة لمشاركتها!');
+    const res = await shareItemWithImages(item, categoryName, subCategoryName);
+    if (res.method === 'native_files') {
+      setShareNotice('تم تجهيز الصور والنص! اختر تطبيق واتساب من القائمة للمشاركة المباشرة.');
+      setTimeout(() => setShareNotice(null), 4000);
+    } else if (res.method === 'copied') {
+      setShareNotice('تم نسخ تفاصيل القطعة إلى الحافظة!');
       setTimeout(() => setShareNotice(null), 3000);
     }
   };
@@ -201,7 +205,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                   className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-900 dark:bg-slate-800 py-2.5 text-xs font-bold text-white hover:bg-slate-800 dark:hover:bg-slate-700 transition min-h-[40px] border border-slate-700"
                 >
                   <Share2 className="h-4 w-4 text-amber-400" />
-                  <span>مشاركة بيانات القطعة</span>
+                  <span>مشاركة بالصور والنص (Web Share / أندرويد)</span>
                 </button>
 
                 <button
@@ -209,7 +213,15 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                   className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-500 transition min-h-[40px]"
                 >
                   <MessageCircle className="h-4 w-4 text-white" />
-                  <span>إرسال عبر WhatsApp</span>
+                  <span>مشاركة نصية مباشرة عبر WhatsApp</span>
+                </button>
+
+                <button
+                  onClick={() => downloadItemImage(item)}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-100 dark:bg-slate-800 py-2 text-xs font-bold text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition min-h-[36px]"
+                >
+                  <Download className="h-3.5 w-3.5 text-amber-500" />
+                  <span>حفظ صورة القطعة للجهاز</span>
                 </button>
 
                 <button
