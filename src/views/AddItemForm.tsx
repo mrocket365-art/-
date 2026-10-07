@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Item, Category, SubCategory, ColorDetail } from '../types';
 import { checkBarcodeExists, generateUniqueBarcode } from '../utils/storage';
-import { compressDataUrl, readFileAsDataURL } from '../utils/imageCompressor';
+import { compressDataUrl, compressFileToDataUrl } from '../utils/imageCompressor';
+import { getNearestArabicColorName } from '../utils/colorNames';
 import { ImageColorPickerModal } from '../components/ImageColorPickerModal';
 import {
   Upload,
@@ -19,6 +20,8 @@ import {
   Images,
   Trash2,
   Star,
+  Check,
+  Loader2,
 } from 'lucide-react';
 
 interface AddItemFormProps {
@@ -31,26 +34,24 @@ interface AddItemFormProps {
   onAddSubCategory?: (categoryId: string, name: string) => SubCategory | void;
 }
 
-// Preset visual color palette list
+// Preset visual color palette list for one-tap selection
 const POPULAR_SHADES = [
-  { name: 'أسود فاحم', hex: '#000000' },
-  { name: 'أبيض ناصع', hex: '#ffffff' },
-  { name: 'أحمر كلاسيكي', hex: '#ef4444' },
-  { name: 'عنابي داكن', hex: '#881337' },
-  { name: 'وردي وردي', hex: '#ec4899' },
-  { name: 'وردي فاتح', hex: '#fbcfe8' },
-  { name: 'أزرق سماوي', hex: '#38bdf8' },
-  { name: 'أزرق ملكي', hex: '#2563eb' },
+  { name: 'أسود', hex: '#000000' },
+  { name: 'أبيض', hex: '#ffffff' },
   { name: 'كحلي داكن', hex: '#1e3a8a' },
+  { name: 'أحمر', hex: '#ef4444' },
+  { name: 'عنابي داكن', hex: '#881337' },
+  { name: 'بيج', hex: '#f5f5dc' },
+  { name: 'بني', hex: '#451a03' },
+  { name: 'وردي', hex: '#ec4899' },
   { name: 'أخضر زيتي', hex: '#3f6212' },
   { name: 'أخضر زمردي', hex: '#059669' },
   { name: 'أصفر خردلي', hex: '#d97706' },
-  { name: 'ذهبي لامع', hex: '#e5be58' },
-  { name: 'بني شوكولاتة', hex: '#451a03' },
-  { name: 'بيج فاتح', hex: '#f5f5dc' },
-  { name: 'رمادي رصاصي', hex: '#475569' },
-  { name: 'بنفسجي ملكي', hex: '#7c3aed' },
-  { name: 'برتقالي هادئ', hex: '#f97316' },
+  { name: 'ذهبي', hex: '#e5be58' },
+  { name: 'رمادي', hex: '#475569' },
+  { name: 'بنفسجي', hex: '#7c3aed' },
+  { name: 'أزرق سماوي', hex: '#38bdf8' },
+  { name: 'برتقالي', hex: '#f97316' },
 ];
 
 export const AddItemForm: React.FC<AddItemFormProps> = ({
@@ -67,7 +68,7 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
   const [subCategoryId, setSubCategoryId] = useState(editingItem?.subCategoryId || '');
   const [barcode, setBarcode] = useState(editingItem?.barcode || '');
 
-  // Multi-image state
+  // Multi-image state & loading state
   const [images, setImages] = useState<string[]>(() => {
     if (editingItem?.images && editingItem.images.length > 0) {
       return editingItem.images;
@@ -77,6 +78,7 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
     }
     return [];
   });
+  const [isCompressingImages, setIsCompressingImages] = useState(false);
 
   // Color Details State
   const [colorDetails, setColorDetails] = useState<ColorDetail[]>(() => {
@@ -95,10 +97,10 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
 
   const [barcodeWarning, setBarcodeWarning] = useState<string | null>(null);
 
-  // Interactive Color Picker Modal
-  const [showColorPickerModal, setShowColorPickerModal] = useState(false);
-  const [colorModalName, setColorModalName] = useState('');
+  // Color Picker State
   const [colorModalHex, setColorModalHex] = useState('#2563eb');
+  const [colorModalName, setColorModalName] = useState('أزرق');
+  const [showImageColorPickerModal, setShowImageColorPickerModal] = useState(false);
 
   // Quick Add Category/Subcategory Modals
   const [showAddCatModal, setShowAddCatModal] = useState(false);
@@ -149,23 +151,27 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
     }
   }, [barcode, editingItem]);
 
-  // Multi-image upload handler
+  // Multi-image upload handler using fast canvas compressor
   const handleMultipleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
+      setIsCompressingImages(true);
       const compressedList: string[] = [];
       for (const file of Array.from(files)) {
         try {
-          const raw = await readFileAsDataURL(file);
-          const compressed = await compressDataUrl(raw, 800, 800, 0.75);
-          compressedList.push(compressed);
+          // Directly compress File object to HD resolution (max 1600px, quality 0.85) for crisp WhatsApp sharing
+          const compressed = await compressFileToDataUrl(file, 1600, 1600, 0.85);
+          if (compressed) {
+            compressedList.push(compressed);
+          }
         } catch (err) {
-          console.error('Failed to read/compress image', err);
+          console.error('Failed to compress file:', err);
         }
       }
       if (compressedList.length > 0) {
         setImages((prev) => [...prev, ...compressedList]);
       }
+      setIsCompressingImages(false);
     }
   };
 
@@ -185,33 +191,30 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
     const cleanName = nameToAdd.trim();
     if (!cleanName) return;
 
-    // Check duplicate name
     if (!colorDetails.some((cd) => cd.name === cleanName)) {
       setColorDetails([...colorDetails, { name: cleanName, hex: hexToAdd }]);
     }
-    setColorModalName('');
-    setShowColorPickerModal(false);
   };
 
   const removeColorDetail = (nameToRemove: string) => {
     setColorDetails(colorDetails.filter((cd) => cd.name !== nameToRemove));
   };
 
-  // Interactive Image/Screen Color Picker Modal
-  const [showImageColorPickerModal, setShowImageColorPickerModal] = useState(false);
+  // Update color hex and auto-suggest Arabic color name
+  const handleColorHexChange = (newHex: string) => {
+    setColorModalHex(newHex);
+    const suggestedName = getNearestArabicColorName(newHex);
+    setColorModalName(suggestedName);
+  };
 
   // EyeDropper API & Image Screen Color Picker
   const handleEyeDropper = async () => {
-    // If native EyeDropper is available on desktop, try it first
     if ('EyeDropper' in window) {
       try {
         const eyeDropper = new (window as unknown as { EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> } }).EyeDropper();
         const result = await eyeDropper.open();
         if (result && result.sRGBHex) {
-          setColorModalHex(result.sRGBHex);
-          if (!colorModalName) {
-            setColorModalName(`درجة ${result.sRGBHex.toUpperCase()}`);
-          }
+          handleColorHexChange(result.sRGBHex);
           return;
         }
       } catch (err) {
@@ -219,7 +222,6 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
       }
     }
 
-    // Fallback or Image Picker if photo exists
     if (images.length > 0) {
       setShowImageColorPickerModal(true);
     } else {
@@ -306,7 +308,7 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
 
     const rawImages = images.length > 0 ? images : [defaultImage];
     const finalImages = await Promise.all(
-      rawImages.map((img) => compressDataUrl(img, 800, 800, 0.75))
+      rawImages.map((img) => compressDataUrl(img, 600, 600, 0.65))
     );
     const primaryImage = finalImages[0];
     const colorsList = colorDetails.map((cd) => cd.name);
@@ -355,12 +357,20 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400">
               <Images className="h-4.5 w-4.5 text-amber-500" />
-              <span>صور القطعة (يمكنك رفع عدة صور)</span> <span className="text-red-500">*</span>
+              <span>صور القطعة (يمكنك اختيار عدة صور معاً)</span> <span className="text-red-500">*</span>
             </label>
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
               {images.length} صور مضافة
             </span>
           </div>
+
+          {/* Loading Indicator when compressing */}
+          {isCompressingImages && (
+            <div className="flex items-center justify-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs font-bold animate-pulse">
+              <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+              <span>جاري ضغط ومعالجة الصور المحددة لضمان السرعة...</span>
+            </div>
+          )}
 
           {/* Images Gallery Display */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -369,7 +379,15 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
                 key={index}
                 className="group relative aspect-square rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs"
               >
-                <img src={imgUrl} alt={`صورة ${index + 1}`} className="h-full w-full object-cover" />
+                <img
+                  src={imgUrl}
+                  alt={`صورة ${index + 1}`}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    // Fallback for broken image
+                    (e.target as HTMLImageElement).src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="%23334155"/><text x="50%" y="50%" fill="%23ffffff" font-size="14" text-anchor="middle" dominant-baseline="middle">صورة ${index + 1}</text></svg>`;
+                  }}
+                />
 
                 {/* Primary Cover Badge */}
                 {index === 0 ? (
@@ -417,7 +435,7 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
           </div>
 
           <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-            💡 الصورة الأولى تظهر كغلاف رئيسي للقطعة، ويمكنك النقر على أي صورة إضافية لتعيينها كغلاف رئيسي.
+            💡 يتم تحسين وضغط الصور تلقائياً للحفاظ على مساحة الهاتف وسرعة التطبيق.
           </p>
         </div>
 
@@ -436,7 +454,7 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="مثال: بلوزة نسائية حريرية"
+              placeholder="مثال: فستان نسائي مع كوت شاش"
               className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-xs md:text-sm font-bold text-slate-900 dark:text-white focus:border-amber-500 focus:outline-hidden transition"
               required
             />
@@ -536,7 +554,6 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
             />
           </div>
 
-          {/* Barcode Duplicate Warning */}
           {barcodeWarning ? (
             <div className="flex items-center gap-2 text-xs font-bold text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950/60 p-3 rounded-xl border border-red-200 dark:border-red-800">
               <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
@@ -550,12 +567,12 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
           )}
         </div>
 
-        {/* 4. Touch-Friendly Interactive Colors Selection (Inline Color Picker + Name Input) */}
+        {/* 4. Enhanced Sleek Color Selection Section */}
         <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200 dark:border-amber-500/20 space-y-4">
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400">
               <Palette className="h-4.5 w-4.5 text-amber-500" />
-              <span>ألوان القطعة وتحديد الدرجة اللونية بدقة</span>
+              <span>ألوان القطعة وتحديد الدرجات اللونية</span>
             </label>
 
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
@@ -579,7 +596,6 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
                     style={{ backgroundColor: cd.hex }}
                   />
                   <span style={{ color: cd.hex }} className="font-black">{cd.name}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">({cd.hex})</span>
                   <button
                     type="button"
                     onClick={() => removeColorDetail(cd.name)}
@@ -592,34 +608,74 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
             )}
           </div>
 
-          {/* Touch-Friendly Inline Input: Color Picker + Text Input + Add Button */}
+          {/* A) Quick One-Tap Popular Colors Grid */}
           <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300">
-              اختر الدرجة اللونية من المربع واكتب اسم اللون (مثل: زيتي فاتح، كحلي داكن...):
-            </label>
+            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+              1. اختر الألوان السريعة بنقرة واحدة:
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {POPULAR_SHADES.map((shade) => {
+                const isSelected = colorDetails.some((cd) => cd.name === shade.name);
+                return (
+                  <button
+                    key={shade.name}
+                    type="button"
+                    onClick={() => {
+                      if (isSelected) {
+                        removeColorDetail(shade.name);
+                      } else {
+                        handleAddColorDetail(shade.name, shade.hex);
+                      }
+                    }}
+                    className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-bold border transition active:scale-95 ${
+                      isSelected
+                        ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 ring-1 ring-amber-500'
+                        : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-4 w-4 rounded-full border border-black/20 shrink-0 shadow-2xs"
+                        style={{ backgroundColor: shade.hex }}
+                      />
+                      <span>{shade.name}</span>
+                    </div>
+                    {isSelected && <Check className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-            <div className="flex items-center gap-2">
-              {/* Interactive Color Picker directly next to Text Input */}
-              <div className="relative shrink-0 flex items-center" title="انقر لتحديد الدرجة اللونية بدقة">
-                <input
-                  type="color"
-                  value={colorModalHex}
-                  onChange={(e) => setColorModalHex(e.target.value)}
-                  className="h-12 w-12 cursor-pointer rounded-xl border-2 border-amber-500/50 dark:border-amber-500/80 bg-slate-50 dark:bg-slate-950 p-1 transition hover:scale-105"
-                />
-              </div>
+          {/* B) Custom Color Picker with Auto-Name Generation */}
+          <div className="space-y-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                2. أو حدد أي درجة لونية مخصصة بالدائرة أو من صورة القطعة:
+              </span>
 
-              {/* EyeDropper button if supported */}
-              {'EyeDropper' in window && (
+              {images.length > 0 && (
                 <button
                   type="button"
                   onClick={handleEyeDropper}
-                  className="flex items-center justify-center h-12 w-11 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 shrink-0 transition"
-                  title="التقاط لون بالقطارة من الصورة"
+                  className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded-xl border border-amber-500/30 transition"
                 >
-                  <Pipette className="h-5 w-5" />
+                  <Pipette className="h-3.5 w-3.5" />
+                  <span>التقاط من صورة القطعة</span>
                 </button>
               )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Visual Color Circle Picker */}
+              <div className="relative shrink-0 flex items-center" title="اختر درجة اللون">
+                <input
+                  type="color"
+                  value={colorModalHex}
+                  onChange={(e) => handleColorHexChange(e.target.value)}
+                  className="h-12 w-12 cursor-pointer rounded-xl border-2 border-amber-500 bg-slate-50 dark:bg-slate-950 p-1 transition hover:scale-105"
+                />
+              </div>
 
               {/* Text Input for Color Name */}
               <input
@@ -634,7 +690,7 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
                     }
                   }
                 }}
-                placeholder="اكتب اسم اللون (مثل: أزرق فيروزي، عنابي)..."
+                placeholder="اسم اللون (مثل: زيتي فاتح)..."
                 className="flex-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3.5 py-3 text-xs md:text-sm font-bold text-slate-900 dark:text-white focus:border-amber-500 focus:outline-hidden min-h-[48px]"
               />
 
@@ -643,46 +699,10 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
                 type="button"
                 disabled={!colorModalName.trim()}
                 onClick={() => handleAddColorDetail(colorModalName, colorModalHex)}
-                className="rounded-xl bg-amber-500 hover:bg-amber-400 px-4 text-xs font-black text-slate-950 disabled:opacity-50 transition min-h-[48px] shrink-0 active:scale-95"
+                className="rounded-xl bg-amber-500 hover:bg-amber-400 px-4 text-xs font-black text-slate-950 disabled:opacity-50 transition min-h-[48px] shrink-0 active:scale-95 shadow-2xs"
               >
-                + إضافة اللون
+                + إضافة هذا اللون
               </button>
-            </div>
-          </div>
-
-          {/* Quick Preset Shades List */}
-          <div className="pt-2">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-2">
-              أو اختر من الدرجات الجاهزة بنقرة واحدة:
-            </span>
-            <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto no-scrollbar p-1.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800">
-              {POPULAR_SHADES.map((shade) => {
-                const isSelected = colorDetails.some((cd) => cd.name === shade.name);
-                return (
-                  <button
-                    key={shade.name}
-                    type="button"
-                    onClick={() => {
-                      if (isSelected) {
-                        removeColorDetail(shade.name);
-                      } else {
-                        handleAddColorDetail(shade.name, shade.hex);
-                      }
-                    }}
-                    className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold border transition active:scale-95 min-h-[38px] ${
-                      isSelected
-                        ? 'border-amber-500 bg-amber-50 dark:bg-slate-800 text-amber-700 dark:text-amber-400 font-black'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span
-                      className="h-4 w-4 rounded-full inline-block shrink-0 border border-black/20"
-                      style={{ backgroundColor: shade.hex }}
-                    />
-                    <span>{shade.name}</span>
-                  </button>
-                );
-              })}
             </div>
           </div>
         </div>
@@ -779,7 +799,7 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
         <div className="flex gap-3 pt-2">
           <button
             type="submit"
-            disabled={!!barcodeWarning}
+            disabled={!!barcodeWarning || isCompressingImages}
             className="flex-1 flex items-center justify-center gap-2 min-h-[48px] rounded-2xl bg-amber-500 py-3.5 text-xs md:text-sm font-black text-slate-950 shadow-md shadow-amber-500/20 hover:bg-amber-400 active:scale-95 disabled:opacity-50 transition"
           >
             <CheckCircle2 className="h-5 w-5" />
@@ -796,111 +816,14 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
         </div>
       </form>
 
-      {/* Interactive Color Picker Modal */}
-      {showColorPickerModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 p-6 shadow-2xl dir-rtl border border-amber-500/30 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Palette className="h-5 w-5 text-amber-500" />
-                <h3 className="text-sm md:text-base font-bold text-slate-900 dark:text-white">
-                  تحديد اسم الدرجة اللونية واللون بدقة
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowColorPickerModal(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Live Preview Card */}
-            <div
-              className="flex items-center gap-3 p-4 rounded-2xl border shadow-inner transition"
-              style={{ backgroundColor: colorModalHex + '15', borderColor: colorModalHex }}
-            >
-              <div
-                className="h-10 w-10 rounded-2xl border-2 border-white dark:border-slate-900 shadow-md shrink-0"
-                style={{ backgroundColor: colorModalHex }}
-              />
-              <div>
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">معاينة الدرجة المختارة:</span>
-                <span className="text-sm font-black text-slate-900 dark:text-white">
-                  {colorModalName.trim() || 'اكتب اسم الدرجة أدناه'}
-                </span>
-                <span className="text-xs font-mono font-bold block text-slate-600 dark:text-slate-300">
-                  {colorModalHex}
-                </span>
-              </div>
-            </div>
-
-            {/* Inputs Form */}
-            <div className="space-y-3">
-              {/* Color Name Input */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  اسم اللون والتأثير (مثل: أزرق سماوي، أحمر عنابي، أخضر زيتي):
-                </label>
-                <input
-                  type="text"
-                  value={colorModalName}
-                  onChange={(e) => setColorModalName(e.target.value)}
-                  placeholder="مثال: أزرق فيروزي..."
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3.5 py-2.5 text-xs md:text-sm font-bold text-slate-900 dark:text-white focus:outline-hidden"
-                  autoFocus
-                />
-              </div>
-
-              {/* Precise Color Wheel Picker Input */}
-              <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
-                <input
-                  type="color"
-                  value={colorModalHex}
-                  onChange={(e) => setColorModalHex(e.target.value)}
-                  className="h-12 w-12 cursor-pointer rounded-2xl border border-slate-300 dark:border-slate-700 p-1 shrink-0"
-                />
-                <div className="flex-1">
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                    انقر على المربع لاختيار أي درجة لونية من لوحة الألوان
-                  </span>
-                  <span className="text-[11px] text-slate-500">كود اللون: {colorModalHex}</span>
-                </div>
-
-                {'EyeDropper' in window && (
-                  <button
-                    type="button"
-                    onClick={handleEyeDropper}
-                    className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 transition"
-                    title="التقاط لون بالقطارة من الصورة"
-                  >
-                    <Pipette className="h-5 w-5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                disabled={!colorModalName.trim()}
-                onClick={() => handleAddColorDetail(colorModalName, colorModalHex)}
-                className="flex-1 rounded-xl bg-amber-500 py-3 text-xs font-black text-slate-950 hover:bg-amber-400 disabled:opacity-50 transition shadow-xs"
-              >
-                حفظ وإضافة اللون
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowColorPickerModal(false)}
-                className="rounded-xl border border-slate-300 dark:border-slate-700 px-5 py-3 text-xs font-bold text-slate-700 dark:text-slate-300"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Image Touch Color Picker Modal */}
+      {showImageColorPickerModal && images.length > 0 && (
+        <ImageColorPickerModal
+          isOpen={showImageColorPickerModal}
+          imageSrc={images[0]}
+          onClose={() => setShowImageColorPickerModal(false)}
+          onSelectColor={(colorName, hex) => handleAddColorDetail(colorName, hex)}
+        />
       )}
 
       {/* Quick Add Category Modal */}
@@ -992,15 +915,6 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
           </div>
         </div>
       )}
-      {/* Interactive Photo Screen Color Picker Modal */}
-      <ImageColorPickerModal
-        isOpen={showImageColorPickerModal}
-        imageSrc={images[0] || ''}
-        onClose={() => setShowImageColorPickerModal(false)}
-        onSelectColor={(selectedName, selectedHex) => {
-          handleAddColorDetail(selectedName, selectedHex);
-        }}
-      />
     </div>
   );
 };

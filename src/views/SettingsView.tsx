@@ -13,13 +13,15 @@ import {
   Info,
   Sun,
   Moon,
+  Cloud,
 } from 'lucide-react';
 
 interface SettingsViewProps {
   onReloadData: () => void;
+  onOpenCloudSync?: () => void;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ onReloadData }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ onReloadData, onOpenCloudSync }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
 
@@ -107,7 +109,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onReloadData }) => {
         </div>
       </div>
 
-      {/* 1. App Installation / Android Readiness */}
+      {/* 0.5. Cloud Storage & Sync Card (Optional) */}
+      {onOpenCloudSync && (
+        <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200 dark:border-amber-500/20 space-y-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-300 border border-amber-500/20">
+                <Cloud className="h-3.5 w-3.5 text-amber-500" />
+                <span>التخزين السحابي والمزامنة (اختياري)</span>
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">مزامنة البيانات بين الأجهزة</h3>
+              <p className="text-xs text-slate-600 dark:text-slate-300 max-w-md leading-relaxed font-medium">
+                احفظ بياناتك سحابياً وافتح منتجاتك وأرشيفك من أي هاتف أو كمبيوتر آخر بضغطة زر.
+              </p>
+            </div>
+
+            <button
+              onClick={onOpenCloudSync}
+              className="shrink-0 flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-2.5 text-xs font-black text-slate-950 shadow-xs transition"
+            >
+              <Cloud className="h-4 w-4" />
+              <span>إدارة المزامنة السحابية</span>
+            </button>
+          </div>
+        </div>
+      )}
       <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 text-slate-900 dark:text-white shadow-xs border border-slate-200 dark:border-slate-800">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="space-y-1">

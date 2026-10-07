@@ -110,7 +110,6 @@ export function loadItems(): Item[] {
   try {
     const raw = localStorage.getItem(KEYS.ITEMS);
     if (!raw) {
-      saveItems(INITIAL_ITEMS);
       return INITIAL_ITEMS;
     }
     return JSON.parse(raw);
@@ -120,25 +119,39 @@ export function loadItems(): Item[] {
   }
 }
 
+export async function loadItemsAsync(): Promise<Item[]> {
+  const idbItems = await loadItemsFromIDB();
+  if (idbItems && idbItems.length > 0) {
+    // Also keep localStorage in sync
+    try {
+      localStorage.setItem(KEYS.ITEMS, JSON.stringify(idbItems));
+    } catch (e) {
+      // Ignored if localstorage quota exceeded
+    }
+    return idbItems;
+  }
+  return loadItems();
+}
+
 export async function saveItems(items: Item[]): Promise<void> {
   // Always persist to IndexedDB asynchronously as master storage
-  saveItemsToIDB(items);
+  await saveItemsToIDB(items);
 
   // First try saving directly to LocalStorage
   try {
     localStorage.setItem(KEYS.ITEMS, JSON.stringify(items));
     return;
   } catch (err) {
-    console.warn('LocalStorage QuotaExceededError detected in saveItems. Compressing images...', err);
+    console.warn('LocalStorage QuotaExceededError detected in saveItems. Compressing images for localStorage cache...', err);
   }
 
-  // Fallback 1: Compress images of all items to small JPEG thumbnails
+  // Fallback 1: Compress images of all items to small JPEG thumbnails for LocalStorage cache
   try {
     const compressedItems = await Promise.all(
       items.map(async (item) => {
         const itemImages = item.images || (item.image ? [item.image] : []);
         const compImgs = await Promise.all(
-          itemImages.map((img) => compressDataUrl(img, 400, 400, 0.6))
+          itemImages.map((img) => compressDataUrl(img, 300, 300, 0.5))
         );
         return {
           ...item,
@@ -151,7 +164,7 @@ export async function saveItems(items: Item[]): Promise<void> {
     localStorage.setItem(KEYS.ITEMS, JSON.stringify(compressedItems));
     console.log('Successfully saved compressed items to LocalStorage.');
   } catch (err2) {
-    console.warn('LocalStorage still full after compression. Keeping master copy in IndexedDB only.', err2);
+    console.warn('LocalStorage still full after compression. Master copy remains safe in IndexedDB.', err2);
   }
 }
 

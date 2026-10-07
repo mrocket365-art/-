@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Item, Category, SubCategory } from '../types';
 import { BarcodeSVG } from '../components/BarcodeSVG';
-import { shareItemWithImages, openWhatsAppShare, downloadItemImage } from '../utils/share';
+import { shareItemWithImages, shareImagesOnly, openWhatsAppShare, downloadItemImage } from '../utils/share';
 import {
   X,
   Edit,
@@ -62,14 +62,32 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   };
 
   const handleShareNative = async () => {
+    setShareNotice('جاري فتح قائمة المشاركة لـ واتساب والتطبيقات...');
     const res = await shareItemWithImages(item, categoryName, subCategoryName);
     if (res.method === 'native_files') {
-      setShareNotice('تم تجهيز الصور والنص! اختر تطبيق واتساب من القائمة للمشاركة المباشرة.');
+      setShareNotice('تم فتح قائمة مشاركة الصور والنص بنجاح! اختر واتساب من القائمة.');
+      setTimeout(() => setShareNotice(null), 5000);
+    } else if (res.method === 'native_text') {
+      setShareNotice('تم فتح قائمة المشاركة النصية عبر التطبيقات.');
       setTimeout(() => setShareNotice(null), 4000);
-    } else if (res.method === 'copied') {
-      setShareNotice('تم نسخ تفاصيل القطعة إلى الحافظة!');
+    } else if (res.method === 'whatsapp') {
+      setShareNotice('تم فتح واتساب ونسخ النص للحافظة!');
+      setTimeout(() => setShareNotice(null), 4000);
+    } else {
+      setShareNotice('تم نسخ تفاصيل القطعة إلى الحافظة لسهولة اللصق!');
       setTimeout(() => setShareNotice(null), 3000);
     }
+  };
+
+  const handleShareImagesHD = async () => {
+    setShareNotice('جاري مشاركة صور القطعة بدقة عالية HD...');
+    const shared = await shareImagesOnly(item);
+    if (shared) {
+      setShareNotice('تم فتح مشاركة الصور بدقة عالية HD!');
+    } else {
+      setShareNotice('تم حفظ الصور عالية الدقة للجهاز بنجاح!');
+    }
+    setTimeout(() => setShareNotice(null), 4000);
   };
 
   const handleShareWhatsApp = () => {
@@ -205,7 +223,15 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                   className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-900 dark:bg-slate-800 py-2.5 text-xs font-bold text-white hover:bg-slate-800 dark:hover:bg-slate-700 transition min-h-[40px] border border-slate-700"
                 >
                   <Share2 className="h-4 w-4 text-amber-400" />
-                  <span>مشاركة بالصور والنص (Web Share / أندرويد)</span>
+                  <span>مشاركة الشاملة بالصور والنص (أندرويد / واتساب)</span>
+                </button>
+
+                <button
+                  onClick={handleShareImagesHD}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 py-2.5 text-xs font-black text-amber-700 dark:text-amber-300 border border-amber-500/30 transition min-h-[40px]"
+                >
+                  <ImageIcon className="h-4 w-4 text-amber-500" />
+                  <span>مشاركة صور القطعة فقط (دقة عالية HD)</span>
                 </button>
 
                 <button

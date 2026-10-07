@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScanBarcode, Plus, Settings, Sun, Moon } from 'lucide-react';
+import { ScanBarcode, Plus, Settings, Sun, Moon, Cloud } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 import { useTheme } from '../context/ThemeContext';
 
@@ -7,6 +7,7 @@ interface HeaderProps {
   onOpenScanner: () => void;
   onAddItem: () => void;
   onOpenSettings: () => void;
+  onOpenCloudSync?: () => void;
   title?: string;
   activeTab?: string;
 }
@@ -15,6 +16,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenScanner,
   onAddItem,
   onOpenSettings,
+  onOpenCloudSync,
   title,
   activeTab,
 }) => {
@@ -47,6 +49,17 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Header Action Shortcuts */}
         <div className="flex items-center gap-2">
+          {/* Cloud Sync Optional Button */}
+          {onOpenCloudSync && (
+            <button
+              onClick={onOpenCloudSync}
+              className="flex items-center justify-center h-10 w-10 rounded-xl transition border min-h-[40px] min-w-[40px] bg-amber-500/10 dark:bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 border-amber-500/30 active:scale-95"
+              title="المزامنة السحابية (اختياري)"
+            >
+              <Cloud className="h-4.5 w-4.5 text-amber-500" />
+            </button>
+          )}
+
           {/* Theme Toggle Button (Light/Dark Mode) */}
           <button
             onClick={toggleTheme}

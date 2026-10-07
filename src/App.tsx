@@ -6,6 +6,7 @@ import {
   loadSubCategories,
   saveSubCategories,
   loadItems,
+  loadItemsAsync,
   saveItems,
   loadItemsFromIDB,
 } from './utils/storage';
@@ -14,6 +15,7 @@ import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { BarcodeScannerModal } from './components/BarcodeScannerModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
+import { CloudSyncModal } from './components/CloudSyncModal';
 
 import { DashboardView } from './views/DashboardView';
 import { ItemsListView } from './views/ItemsListView';
@@ -34,24 +36,21 @@ export default function App() {
 
   // Modals
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isCloudSyncOpen, setIsCloudSyncOpen] = useState(false);
   const [selectedItemForDetails, setSelectedItemForDetails] = useState<Item | null>(null);
   const [itemToEdit, setItemToEdit] = useState<Item | null>(null);
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
 
-  // Reload data from LocalStorage
-  const reloadData = () => {
+  // Reload data from storage
+  const reloadData = async () => {
     setCategories(loadCategories());
     setSubCategories(loadSubCategories());
-    setItems(loadItems());
+    const loadedItems = await loadItemsAsync();
+    setItems(loadedItems);
   };
 
   useEffect(() => {
     reloadData();
-    loadItemsFromIDB().then((idbItems) => {
-      if (idbItems && idbItems.length > 0) {
-        setItems(idbItems);
-      }
-    });
   }, []);
 
   // Save changes to categories
@@ -222,6 +221,7 @@ export default function App() {
             setActiveTab('add-item');
           }}
           onOpenSettings={() => setActiveTab('settings')}
+          onOpenCloudSync={() => setIsCloudSyncOpen(true)}
           activeTab={activeTab}
           title={
             activeTab === 'dashboard'
@@ -317,9 +317,21 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'settings' && <SettingsView onReloadData={reloadData} />}
+          {activeTab === 'settings' && (
+            <SettingsView
+              onReloadData={reloadData}
+              onOpenCloudSync={() => setIsCloudSyncOpen(true)}
+            />
+          )}
         </main>
       </div>
+
+      {/* Cloud Sync Modal */}
+      <CloudSyncModal
+        isOpen={isCloudSyncOpen}
+        onClose={() => setIsCloudSyncOpen(false)}
+        onSyncComplete={reloadData}
+      />
 
       {/* Camera Barcode Scanner Modal */}
       <BarcodeScannerModal

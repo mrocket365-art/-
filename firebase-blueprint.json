@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "Item": {
+      "title": "Item",
+      "description": "Inventory product item in shop archive",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 300 },
+        "categoryId": { "type": "string" },
+        "subCategoryId": { "type": "string" },
+        "barcode": { "type": "string", "maxLength": 100 },
+        "colors": { "type": "array" },
+        "colorDetails": { "type": "array" },
+        "sizes": { "type": "array" },
+        "image": { "type": "string" },
+        "images": { "type": "array" },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "isHidden": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "name", "categoryId", "barcode", "createdAt", "userId"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Product main category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "icon": { "type": "string" },
+        "isHidden": { "type": "boolean" },
+        "order": { "type": "number" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "name", "userId"]
+    },
+    "SubCategory": {
+      "title": "SubCategory",
+      "description": "Product subcategory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "isHidden": { "type": "boolean" },
+        "order": { "type": "number" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "categoryId", "name", "userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/items/{itemId}": {
+      "schema": { "$ref": "#/entities/Item" },
+      "description": "User inventory items"
+    },
+    "/users/{userId}/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "User custom categories"
+    },
+    "/users/{userId}/subcategories/{subCategoryId}": {
+      "schema": { "$ref": "#/entities/SubCategory" },
+      "description": "User custom subcategories"
+    }
+  }
+}
