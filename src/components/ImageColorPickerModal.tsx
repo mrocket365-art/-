@@ -1,10 +1,11 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { getNearestArabicColorName } from '../utils/colorNames';
 import { X, Pipette, Check, Crosshair, Sparkles } from 'lucide-react';
 
 interface ImageColorPickerModalProps {
   isOpen: boolean;
-  imageSrc: string;
+  imageSrc?: string;
+  images?: string[];
   onClose: () => void;
   onSelectColor: (colorName: string, hex: string) => void;
 }
@@ -12,11 +13,22 @@ interface ImageColorPickerModalProps {
 export const ImageColorPickerModal: React.FC<ImageColorPickerModalProps> = ({
   isOpen,
   imageSrc,
+  images = [],
   onClose,
   onSelectColor,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Combine single imageSrc and images array
+  const allImages = useMemo(() => {
+    if (images && images.length > 0) return images;
+    if (imageSrc) return [imageSrc];
+    return [];
+  }, [imageSrc, images]);
+
+  const [activeImgIndex, setActiveImgIndex] = useState(0);
+  const currentImageSrc = allImages[activeImgIndex] || allImages[0] || '';
 
   const [pickedHex, setPickedHex] = useState('#2563eb');
   const [colorName, setColorName] = useState('أزرق');
@@ -24,12 +36,13 @@ export const ImageColorPickerModal: React.FC<ImageColorPickerModalProps> = ({
   const [isImageLoaded, setIsImageLoaded] = useState(false);
 
   useEffect(() => {
-    if (!isOpen || !imageSrc) return;
+    if (!isOpen || !currentImageSrc) return;
 
     setIsImageLoaded(false);
+    setPointerPos(null);
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.src = imageSrc;
+    img.src = currentImageSrc;
 
     img.onload = () => {
       const canvas = canvasRef.current;
@@ -50,7 +63,7 @@ export const ImageColorPickerModal: React.FC<ImageColorPickerModalProps> = ({
       const centerY = Math.floor(canvas.height / 2);
       pickPixelColor(centerX, centerY);
     };
-  }, [isOpen, imageSrc]);
+  }, [isOpen, currentImageSrc]);
 
   const pickPixelColor = (canvasX: number, canvasY: number) => {
     const canvas = canvasRef.current;
@@ -134,6 +147,36 @@ export const ImageColorPickerModal: React.FC<ImageColorPickerModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
+          {/* Multi-Image Selector Bar if there are multiple images */}
+          {allImages.length > 1 && (
+            <div className="space-y-1.5 bg-slate-50 dark:bg-slate-950 p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 block">
+                اختر الصورة المراد التقاط الألوان منها ({allImages.length} صور مضافة):
+              </span>
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                {allImages.map((img, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setActiveImgIndex(idx)}
+                    className={`relative h-14 w-14 rounded-xl overflow-hidden shrink-0 border-2 transition ${
+                      activeImgIndex === idx
+                        ? 'border-amber-500 shadow-sm scale-105'
+                        : 'border-slate-300 dark:border-slate-700 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={img} alt={`صورة ${idx + 1}`} className="h-full w-full object-cover" />
+                    {activeImgIndex === idx && (
+                      <span className="absolute bottom-0 inset-x-0 bg-amber-500 text-[8px] font-black text-slate-950 text-center py-0.5">
+                        محددة
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <p className="text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
             <Crosshair className="h-4 w-4 text-amber-500 shrink-0" />
             <span>المس أو اسحب إصبعك فوق أي جزء من الصورة لالتقاط درسته اللونية مباشرة:</span>

@@ -8,7 +8,17 @@ import {
   downloadAllFromCloud
 } from '../utils/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { loadCategories, loadSubCategories, saveCategories, saveSubCategories, saveItems, loadItemsAsync } from '../utils/storage';
+import {
+  loadCategories,
+  loadSubCategories,
+  saveCategories,
+  saveSubCategories,
+  saveItems,
+  loadItemsAsync,
+  loadSyncLogs,
+  clearSyncLogs,
+  SyncLog
+} from '../utils/storage';
 import { Item, Category, SubCategory } from '../types';
 import {
   Cloud,
@@ -21,7 +31,10 @@ import {
   Loader2,
   ShieldCheck,
   UserCheck,
-  LogIn
+  LogIn,
+  History,
+  RefreshCw,
+  Trash2
 } from 'lucide-react';
 
 interface CloudSyncModalProps {
@@ -38,27 +51,52 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [currentUser, setCurrentUser] = useState<User | null>(auth.currentUser);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [logs, setLogs] = useState<SyncLog[]>([]);
+
+  const refreshLogs = () => {
+    setLogs(loadSyncLogs());
+  };
 
   useEffect(() => {
+    if (isOpen) {
+      refreshLogs();
+    }
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
     });
     return () => unsubscribe();
-  }, []);
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleClearLogs = () => {
+    clearSyncLogs();
+    refreshLogs();
+  };
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     setStatusMessage(null);
     try {
       const user = await loginWithGoogle();
-      setStatusMessage({ type: 'success', text: `أهلاً بك ${user.displayName || user.email}! تم ربط الحساب السحابي بنجاح.` });
+      if (user.isAnonymous) {
+        const currentDomain = typeof window !== 'undefined' ? window.location.hostname : '';
+        setStatusMessage({
+          type: 'info',
+          text: `تم تفعيل المزامنة السحابية المباشرة. (النطاق الحالي: ${currentDomain}). لاستخدام حساب Google، يُرجى التأكد من إضافة هذا النطاق إلى Authorized Domains وتفعيل Google Provider في Firebase Console.`
+        });
+      } else {
+        setStatusMessage({
+          type: 'success',
+          text: `أهلاً بك ${user.displayName || user.email || ''}! تم ربط الحساب السحابي بنجاح.`
+        });
+      }
     } catch (err: unknown) {
       console.warn('Google Sign In Error:', err);
+      const currentDomain = typeof window !== 'undefined' ? window.location.hostname : '';
       setStatusMessage({
         type: 'error',
-        text: 'تعذر فتح نافذة Google. يرجى استخدام زر (تفعيل المزامنة الفورية) بالأسفل للعمل مباشرة.'
+        text: `تعذر فتح Google. تأكد من إضافة النطاق (${currentDomain}) إلى Authorized Domains وتفعيل Google Auth في Firebase Console.`
       });
     } finally {
       setIsLoading(false);
@@ -113,6 +151,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       const items = await loadItemsAsync();
 
       const result = await uploadAllToCloud(activeUser.uid, items, categories, subCategories);
+      refreshLogs();
       if (result.success) {
         setStatusMessage({
           type: 'success',
@@ -129,6 +168,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       const msg = err instanceof Error ? err.message : String(err);
       setStatusMessage({ type: 'error', text: `حدث خطأ أثناء الرفع: ${msg}` });
     } finally {
+      refreshLogs();
       setIsLoading(false);
     }
   };
@@ -150,6 +190,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
     try {
       const data = await downloadAllFromCloud(activeUser.uid);
+      refreshLogs();
       if (data) {
         if (data.categories && data.categories.length > 0) saveCategories(data.categories);
         if (data.subCategories && data.subCategories.length > 0) saveSubCategories(data.subCategories);
@@ -167,6 +208,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       const msg = err instanceof Error ? err.message : String(err);
       setStatusMessage({ type: 'error', text: `حدث خطأ أثناء تنزيل البيانات: ${msg}` });
     } finally {
+      refreshLogs();
       setIsLoading(false);
     }
   };
@@ -316,6 +358,91 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               </button>
             </div>
           )}
+
+          {/* Sync History Logs Section */}
+          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-amber-500" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  سجل عمليات المزامنة الأخيرة
+                </span>
+                {logs.length > 0 && (
+                  <span className="text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded-full">
+                    {logs.length}
+                  </span>
+                )}
+              </div>
+              {logs.length > 0 && (
+                <button
+                  onClick={handleClearLogs}
+                  className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-red-500 transition"
+                  title="مسح سجل المزامنة"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>مسح السجل</span>
+                </button>
+              )}
+            </div>
+
+            {logs.length === 0 ? (
+              <div className="text-center py-5 px-4 rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-200 dark:border-slate-800 text-slate-400 text-xs">
+                لا توجد عمليات مزامنة مسجلة بعد.
+              </div>
+            ) : (
+              <div className="max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                {logs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="flex flex-col gap-1 p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800/80 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200">
+                        {log.action === 'upload' && (
+                          <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                            <CloudUpload className="h-3.5 w-3.5" />
+                            <span>رفع إلى السحاب</span>
+                          </div>
+                        )}
+                        {log.action === 'download' && (
+                          <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                            <CloudDownload className="h-3.5 w-3.5" />
+                            <span>استعادة من السحاب</span>
+                          </div>
+                        )}
+                        {log.action === 'auto_sync' && (
+                          <div className="flex items-center gap-1 text-purple-600 dark:text-purple-400">
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            <span>مزامنة تلقائية</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-slate-400">{log.timestamp}</span>
+                        {log.status === 'success' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                            <CheckCircle2 className="h-3 w-3" />
+                            ناجحة
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                            <AlertCircle className="h-3 w-3" />
+                            فشلت
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                      <span>عدد القطع المزامنة: <strong className="text-slate-700 dark:text-slate-300">{log.itemCount}</strong></span>
+                      {log.details && <span className="truncate max-w-[200px]" title={log.details}>{log.details}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

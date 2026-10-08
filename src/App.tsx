@@ -10,6 +10,8 @@ import {
   saveItems,
   loadItemsFromIDB,
 } from './utils/storage';
+import { auth, downloadAllFromCloud, uploadAllToCloud } from './utils/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -51,6 +53,62 @@ export default function App() {
 
   useEffect(() => {
     reloadData();
+
+    // Background sync when internet connection is restored or available
+    const handleSyncOnConnect = async () => {
+      if (!navigator.onLine) return;
+
+      const user = auth.currentUser;
+      if (!user) return;
+
+      try {
+        console.log('Online status active. Starting background auto-sync between IndexedDB and Firestore...');
+        const cloudData = await downloadAllFromCloud(user.uid, true);
+        if (cloudData && cloudData.items && cloudData.items.length > 0) {
+          if (cloudData.categories && cloudData.categories.length > 0) {
+            saveCategories(cloudData.categories);
+          }
+          if (cloudData.subCategories && cloudData.subCategories.length > 0) {
+            saveSubCategories(cloudData.subCategories);
+          }
+          await saveItems(cloudData.items);
+          await reloadData();
+          console.log('IndexedDB automatically synchronized with Firestore.');
+        } else {
+          // Push local IndexedDB data to Firestore if cloud is empty
+          const categories = loadCategories();
+          const subCategories = loadSubCategories();
+          const items = await loadItemsAsync();
+          if (items && items.length > 0) {
+            await uploadAllToCloud(user.uid, items, categories, subCategories, true);
+            console.log('Local IndexedDB data uploaded to Firestore.');
+          }
+        }
+      } catch (err) {
+        console.warn('Background auto-sync warning:', err);
+      }
+    };
+
+    const handleOnline = () => {
+      handleSyncOnConnect();
+    };
+
+    window.addEventListener('online', handleOnline);
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user && navigator.onLine) {
+        handleSyncOnConnect();
+      }
+    });
+
+    if (navigator.onLine) {
+      handleSyncOnConnect();
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      unsubscribeAuth();
+    };
   }, []);
 
   // Save changes to categories

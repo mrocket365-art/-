@@ -62,10 +62,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   };
 
   const handleShareNative = async () => {
-    setShareNotice('جاري فتح قائمة المشاركة لـ واتساب والتطبيقات...');
+    setShareNotice('جاري تحويل صور القطعة إلى ملفات Blob وبناء قائمة المشاركة...');
     const res = await shareItemWithImages(item, categoryName, subCategoryName);
     if (res.method === 'native_files') {
-      setShareNotice('تم فتح قائمة مشاركة الصور والنص بنجاح! اختر واتساب من القائمة.');
+      setShareNotice('تم فتح قائمة مشاركة جميع الصور والنص بنجاح!');
       setTimeout(() => setShareNotice(null), 5000);
     } else if (res.method === 'native_text') {
       setShareNotice('تم فتح قائمة المشاركة النصية عبر التطبيقات.');
@@ -80,12 +80,12 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   };
 
   const handleShareImagesHD = async () => {
-    setShareNotice('جاري مشاركة صور القطعة بدقة عالية HD...');
+    setShareNotice('جاري تجهيز وتحويل جميع صور القطعة إلى ملفات عالية الدقة HD...');
     const shared = await shareImagesOnly(item);
     if (shared) {
-      setShareNotice('تم فتح مشاركة الصور بدقة عالية HD!');
+      setShareNotice('تم فتح مشاركة جميع صور القطعة بدقة عالية HD!');
     } else {
-      setShareNotice('تم حفظ الصور عالية الدقة للجهاز بنجاح!');
+      setShareNotice('تم تنزيل جميع الصور عالية الدقة للجهاز بنجاح!');
     }
     setTimeout(() => setShareNotice(null), 4000);
   };

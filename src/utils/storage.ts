@@ -190,6 +190,69 @@ export function generateUniqueBarcode(): string {
 }
 
 // Reset data to initial sample
+export interface SyncLog {
+  id: string;
+  timestamp: string;
+  action: 'upload' | 'download' | 'auto_sync';
+  itemCount: number;
+  status: 'success' | 'failed';
+  details?: string;
+}
+
+const SYNC_LOGS_KEY = 'smart_inventory_sync_logs_v1';
+
+export function loadSyncLogs(): SyncLog[] {
+  try {
+    const raw = localStorage.getItem(SYNC_LOGS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Failed to load sync logs', err);
+    return [];
+  }
+}
+
+export function saveSyncLog(log: Omit<SyncLog, 'id' | 'timestamp'> & { timestamp?: string }): SyncLog {
+  try {
+    const existing = loadSyncLogs();
+    const newLog: SyncLog = {
+      id: Date.now().toString() + '_' + Math.random().toString(36).substring(2, 7),
+      timestamp: log.timestamp || new Date().toLocaleString('ar-SA', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      action: log.action,
+      itemCount: log.itemCount,
+      status: log.status,
+      details: log.details,
+    };
+    const updated = [newLog, ...existing].slice(0, 20);
+    localStorage.setItem(SYNC_LOGS_KEY, JSON.stringify(updated));
+    return newLog;
+  } catch (err) {
+    console.error('Failed to save sync log', err);
+    return {
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+      action: log.action,
+      itemCount: log.itemCount,
+      status: log.status,
+      details: log.details,
+    };
+  }
+}
+
+export function clearSyncLogs(): void {
+  try {
+    localStorage.removeItem(SYNC_LOGS_KEY);
+  } catch (err) {
+    console.error('Failed to clear sync logs', err);
+  }
+}
+
 export function resetToInitialData(): { categories: Category[]; subCategories: SubCategory[]; items: Item[] } {
   saveCategories(INITIAL_CATEGORIES);
   saveSubCategories(INITIAL_SUBCATEGORIES);

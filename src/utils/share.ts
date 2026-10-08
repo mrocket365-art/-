@@ -137,20 +137,26 @@ export const shareItemWithImages = async (
     }
   }
 
-  // 2. Web Share API (Desktop / Web Browsers)
+  // 2. Web Share API (Desktop / Web Browsers / Android WebView)
   const filePromises = imagesList
     .filter(Boolean)
-    .slice(0, 4)
-    .map((imgUrl, index) => {
-      const ext = imgUrl.includes('image/svg') ? 'svg' : 'jpg';
-      return urlToFile(imgUrl, `bilal-koo-item-${item.barcode}-${index + 1}.${ext}`);
+    .map(async (imgUrl, index) => {
+      const blob = await urlToBlob(imgUrl);
+      if (!blob) return null;
+      const mimeType = blob.type || (imgUrl.includes('image/svg') ? 'image/svg+xml' : 'image/jpeg');
+      const ext = mimeType.includes('svg') ? 'svg' : 'jpg';
+      return new File([blob], `bilal-koo-item-${item.barcode}-${index + 1}.${ext}`, {
+        type: mimeType,
+        lastModified: Date.now(),
+      });
     });
 
   const files = (await Promise.all(filePromises)).filter((f): f is File => f !== null);
 
   if (typeof navigator !== 'undefined' && navigator.share) {
     try {
-      if (files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+      if (files.length > 0) {
+        // Attempt 1: Share all images + text together
         try {
           await navigator.share({
             title: `قطعة: ${item.name} - بلال كو`,
@@ -159,9 +165,10 @@ export const shareItemWithImages = async (
           });
           return { success: true, method: 'native_files' };
         } catch (fErr) {
-          console.warn('Web Share files + text failed, attempting files only:', fErr);
+          console.warn('Web Share files + text failed, attempting files only with copied text:', fErr);
         }
 
+        // Attempt 2: Copy text to clipboard and share ALL image files only
         try {
           try {
             await navigator.clipboard.writeText(shareText);
@@ -173,10 +180,25 @@ export const shareItemWithImages = async (
           });
           return { success: true, method: 'native_files' };
         } catch (filesOnlyErr) {
-          console.warn('Web Share files-only failed:', filesOnlyErr);
+          console.warn('Web Share files-only failed, attempting single primary file share:', filesOnlyErr);
+        }
+
+        // Attempt 3: If multi-file sharing failed, try sharing primary image file + text
+        if (files.length > 1) {
+          try {
+            await navigator.share({
+              title: `قطعة: ${item.name} - بلال كو`,
+              text: shareText,
+              files: [files[0]],
+            });
+            return { success: true, method: 'native_files' };
+          } catch (singleFileErr) {
+            console.warn('Web Share single-file failed:', singleFileErr);
+          }
         }
       }
 
+      // Fallback: Text only share
       await navigator.share({
         title: `قطعة: ${item.name} - بلال كو`,
         text: shareText,
@@ -251,22 +273,25 @@ export const shareImagesOnly = async (item: Item): Promise<boolean> => {
 
   const filePromises = imagesList
     .filter(Boolean)
-    .slice(0, 4)
-    .map((imgUrl, index) => {
-      const ext = imgUrl.includes('image/svg') ? 'svg' : 'jpg';
-      return urlToFile(imgUrl, `bilal-koo-item-${item.barcode}-${index + 1}.${ext}`);
+    .map(async (imgUrl, index) => {
+      const blob = await urlToBlob(imgUrl);
+      if (!blob) return null;
+      const mimeType = blob.type || (imgUrl.includes('image/svg') ? 'image/svg+xml' : 'image/jpeg');
+      const ext = mimeType.includes('svg') ? 'svg' : 'jpg';
+      return new File([blob], `bilal-koo-item-${item.barcode}-${index + 1}.${ext}`, {
+        type: mimeType,
+        lastModified: Date.now(),
+      });
     });
 
   const files = (await Promise.all(filePromises)).filter((f): f is File => f !== null);
 
   if (files.length > 0 && typeof navigator !== 'undefined' && navigator.share) {
     try {
-      if (navigator.canShare && navigator.canShare({ files })) {
-        await navigator.share({
-          files: files,
-        });
-        return true;
-      }
+      await navigator.share({
+        files: files,
+      });
+      return true;
     } catch (err) {
       console.warn('shareImagesOnly failed:', err);
     }

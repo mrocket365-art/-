@@ -21,6 +21,7 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Item, Category, SubCategory } from '../types';
 import { compressDataUrl } from './imageCompressor';
+import { saveSyncLog } from './storage';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -82,9 +83,16 @@ export async function loginWithGoogle() {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (err) {
-    console.error('Google Sign-In Error:', err);
-    throw err;
+  } catch (err: unknown) {
+    console.warn('Google Sign-In failed or blocked, attempting anonymous auth fallback:', err);
+    // If popup or Google auth fails (e.g., inside Android WebView, popup blocker, or disallowed agent), fallback to anonymous auth
+    try {
+      const anonResult = await signInAnonymously(auth);
+      return anonResult.user;
+    } catch (anonErr) {
+      console.error('Both Google and Anonymous auth failed:', anonErr);
+      throw err;
+    }
   }
 }
 
@@ -107,11 +115,25 @@ export async function uploadAllToCloud(
   userId: string,
   items: Item[],
   categories: Category[],
-  subCategories: SubCategory[]
+  subCategories: SubCategory[],
+  isAutoSync = false
 ): Promise<{ success: boolean; itemCount: number; error?: string }> {
   try {
-    if (!userId) {
-      return { success: false, itemCount: 0, error: 'غير مسجل دخول' };
+    let activeUid = userId || auth.currentUser?.uid;
+    if (!activeUid) {
+      try {
+        const user = await loginAnonymously();
+        activeUid = user.uid;
+      } catch (e) {
+        const errStr = 'غير مسجل دخول - يرجى تفعيل المزامنة أولاً';
+        saveSyncLog({
+          action: isAutoSync ? 'auto_sync' : 'upload',
+          itemCount: 0,
+          status: 'failed',
+          details: errStr,
+        });
+        return { success: false, itemCount: 0, error: errStr };
+      }
     }
 
     // 1. Process items and optimize base64 images so they do not exceed Firestore 1MB doc limit
@@ -145,22 +167,22 @@ export async function uploadAllToCloud(
 
     for (const item of optimizedItems) {
       operations.push({
-        ref: doc(db, `users/${userId}/items`, item.id),
-        data: { ...item, userId },
+        ref: doc(db, `users/${activeUid}/items`, item.id),
+        data: { ...item, userId: activeUid },
       });
     }
 
     for (const cat of categories) {
       operations.push({
-        ref: doc(db, `users/${userId}/categories`, cat.id),
-        data: { ...cat, userId },
+        ref: doc(db, `users/${activeUid}/categories`, cat.id),
+        data: { ...cat, userId: activeUid },
       });
     }
 
     for (const subCat of subCategories) {
       operations.push({
-        ref: doc(db, `users/${userId}/subcategories`, subCat.id),
-        data: { ...subCat, userId },
+        ref: doc(db, `users/${activeUid}/subcategories`, subCat.id),
+        data: { ...subCat, userId: activeUid },
       });
     }
 
@@ -174,26 +196,57 @@ export async function uploadAllToCloud(
       await batch.commit();
     }
 
+    saveSyncLog({
+      action: isAutoSync ? 'auto_sync' : 'upload',
+      itemCount: items.length,
+      status: 'success',
+      details: `تم رفع ${items.length} قطعة بنجاح إلى Firebase`,
+    });
+
     return { success: true, itemCount: items.length };
   } catch (err: unknown) {
     console.error('uploadAllToCloud error:', err);
     const errMsg = err instanceof Error ? err.message : String(err);
-    handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
+
+    saveSyncLog({
+      action: isAutoSync ? 'auto_sync' : 'upload',
+      itemCount: items.length,
+      status: 'failed',
+      details: errMsg,
+    });
+
     return { success: false, itemCount: 0, error: errMsg };
   }
 };
 
 export async function downloadAllFromCloud(
-  userId: string
+  userId: string,
+  isAutoSync = false
 ): Promise<{
   items: Item[];
   categories: Category[];
   subCategories: SubCategory[];
 } | null> {
   try {
-    const itemsSnap = await getDocs(collection(db, `users/${userId}/items`));
-    const categoriesSnap = await getDocs(collection(db, `users/${userId}/categories`));
-    const subCategoriesSnap = await getDocs(collection(db, `users/${userId}/subcategories`));
+    let activeUid = userId || auth.currentUser?.uid;
+    if (!activeUid) {
+      try {
+        const user = await loginAnonymously();
+        activeUid = user.uid;
+      } catch (e) {
+        saveSyncLog({
+          action: isAutoSync ? 'auto_sync' : 'download',
+          itemCount: 0,
+          status: 'failed',
+          details: 'غير مسجل دخول',
+        });
+        return null;
+      }
+    }
+
+    const itemsSnap = await getDocs(collection(db, `users/${activeUid}/items`));
+    const categoriesSnap = await getDocs(collection(db, `users/${activeUid}/categories`));
+    const subCategoriesSnap = await getDocs(collection(db, `users/${activeUid}/subcategories`));
 
     const items: Item[] = [];
     itemsSnap.forEach((doc) => {
@@ -210,9 +263,25 @@ export async function downloadAllFromCloud(
       subCategories.push(doc.data() as SubCategory);
     });
 
+    saveSyncLog({
+      action: isAutoSync ? 'auto_sync' : 'download',
+      itemCount: items.length,
+      status: 'success',
+      details: `تم جلب ${items.length} قطعة بنجاح من Firebase`,
+    });
+
     return { items, categories, subCategories };
   } catch (err) {
-    handleFirestoreError(err, OperationType.GET, `users/${userId}`);
+    console.error('downloadAllFromCloud error:', err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+
+    saveSyncLog({
+      action: isAutoSync ? 'auto_sync' : 'download',
+      itemCount: 0,
+      status: 'failed',
+      details: errMsg,
+    });
+
     return null;
   }
 }

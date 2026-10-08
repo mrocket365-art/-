@@ -820,7 +820,7 @@ export const AddItemForm: React.FC<AddItemFormProps> = ({
       {showImageColorPickerModal && images.length > 0 && (
         <ImageColorPickerModal
           isOpen={showImageColorPickerModal}
-          imageSrc={images[0]}
+          images={images}
           onClose={() => setShowImageColorPickerModal(false)}
           onSelectColor={(colorName, hex) => handleAddColorDetail(colorName, hex)}
         />
